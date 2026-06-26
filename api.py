@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from enum import Enum
 from typing import Optional
 import strawberry
 from strawberry.fastapi import GraphQLRouter
@@ -21,14 +22,14 @@ jobs: dict[str, dict] = {}
 # ── Strawberry type definitions ─────────────────────────────────────────
 
 @strawberry.enum
-class JobStatus:
+class JobStatus(Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     DONE = "DONE"
     ERROR = "ERROR"
 
 @strawberry.enum
-class Recommendation:
+class Recommendation(Enum):
     READY = "READY"
     HOLD = "HOLD"
     BLOCKED = "BLOCKED"
@@ -97,6 +98,7 @@ class ReleaseInputGQL:
     version: str
     from_ref: str
     channel: str
+    thread_ts: Optional[str] = None
 
 # ── Converters ──────────────────────────────────────────────────────────
 
@@ -133,7 +135,7 @@ def _to_gql_result(r: ReleaseResult) -> ReleaseResultGQL:
 
 # ── Pipeline ─────────────────────────────────────────────────────────────
 
-async def run_release_pipeline(job_id: str, version: str, from_ref: str, channel: str) -> None:
+async def run_release_pipeline(job_id: str, version: str, from_ref: str, channel: str, thread_ts: str | None = None) -> None:
     """Runs the full release pipeline via coordinator."""
     jobs[job_id]["status"] = "RUNNING"
     try:
@@ -148,13 +150,17 @@ async def run_release_pipeline(job_id: str, version: str, from_ref: str, channel
         jobs[job_id]["status"] = "DONE"
         jobs[job_id]["result"] = result
 
-        if not release_exists(version):
-            save_release(result, from_ref)
-
-        # Post results to Slack
+        # Post to Slack before DB write so failures don't block delivery
         from release_pilot.slack_poster import post_all as slack_post_all
         from release_pilot import config as release_config
-        slack_post_all(result, channel, release_config.SLACK_BOT_TOKEN)
+        slack_post_all(result, channel, release_config.SLACK_BOT_TOKEN, thread_ts=thread_ts)
+
+        try:
+            if not release_exists(version):
+                save_release(result, from_ref)
+        except Exception as db_err:
+            import logging
+            logging.getLogger(__name__).warning(f"DB save failed (non-fatal): {db_err}")
 
     except Exception as e:
         import traceback
@@ -170,7 +176,7 @@ class Mutation:
         job_id = str(uuid.uuid4())
         jobs[job_id] = {"status": "PENDING", "result": None, "error": None}
         background_tasks: BackgroundTasks = info.context["background_tasks"]
-        background_tasks.add_task(run_release_pipeline, job_id, input.version, input.from_ref, input.channel)
+        background_tasks.add_task(run_release_pipeline, job_id, input.version, input.from_ref, input.channel, input.thread_ts)
         return ReleaseJobGQL(job_id=job_id, status="PENDING")
 
 @strawberry.type

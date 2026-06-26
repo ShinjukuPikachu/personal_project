@@ -54,40 +54,52 @@ def _build_readiness_blocks(result: ReleaseResult) -> list[dict]:
     return blocks
 
 
-def post_all(result: ReleaseResult, channel: str, slack_token: str | None = None) -> None:
-    """Post all 4 Slack messages for a release. Errors are logged but not raised."""
+def _safe_text(text: str | None, fallback: str = "_(no content)_") -> str:
+    return text.strip() if text and text.strip() else fallback
+
+
+def post_all(result: ReleaseResult, channel: str, slack_token: str | None = None, thread_ts: str | None = None) -> None:
+    """Post all 4 Slack messages for a release as thread replies. Errors are logged but not raised."""
     token = slack_token or os.environ.get("SLACK_BOT_TOKEN")
     if not token or not _SLACK_AVAILABLE:
         print(f"[slack_poster] Skipping Slack post — token={'set' if token else 'missing'}, sdk={_SLACK_AVAILABLE}")
         return
 
     client = WebClient(token=token)
-    thread_ts = None
+
+    def _post(text, blocks, reply_ts=None):
+        kwargs = dict(channel=channel, text=text, blocks=blocks)
+        if reply_ts:
+            kwargs["thread_ts"] = reply_ts
+        return client.chat_postMessage(**kwargs)
+
+    parent_ts = thread_ts  # all messages go into the existing thread
 
     try:
-        # Message 1: Internal Announcement
-        resp = client.chat_postMessage(
-            channel=channel,
-            text=f"📢 *Release {result.version} — Internal Announcement*",
+        # Message 1: Internal Announcement (reply to the ⏳ ack)
+        resp = _post(
+            text=f"📢 Release {result.version} — Internal Announcement",
             blocks=[
                 {"type": "header", "text": {"type": "plain_text", "text": f"📢 Release {result.version} — Internal Announcement"}},
-                {"type": "section", "text": {"type": "mrkdwn", "text": result.internal_announcement}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": _safe_text(result.internal_announcement)}},
             ],
+            reply_ts=parent_ts,
         )
-        thread_ts = resp["ts"]
+        if not parent_ts:
+            parent_ts = resp["ts"]  # fallback: use this message as thread root
     except Exception as e:
         print(f"[slack_poster] Failed to post internal announcement: {e}")
         return
 
     try:
         # Message 2: Customer Release Notes
-        client.chat_postMessage(
-            channel=channel,
-            text=f"📋 *{result.version} Customer Release Notes*",
+        _post(
+            text=f"📋 {result.version} Customer Release Notes",
             blocks=[
                 {"type": "header", "text": {"type": "plain_text", "text": f"📋 {result.version} — Customer Release Notes"}},
-                {"type": "section", "text": {"type": "mrkdwn", "text": result.customer_notes}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": _safe_text(result.customer_notes)}},
             ],
+            reply_ts=parent_ts,
         )
     except Exception as e:
         print(f"[slack_poster] Failed to post customer notes: {e}")
@@ -95,24 +107,22 @@ def post_all(result: ReleaseResult, channel: str, slack_token: str | None = None
     try:
         # Message 3: Marketing Release Notes (skip if None)
         if result.marketing_notes:
-            client.chat_postMessage(
-                channel=channel,
-                text=f"📣 *{result.version} Marketing Release Notes*",
+            _post(
+                text=f"📣 {result.version} Marketing Release Notes",
                 blocks=[
                     {"type": "header", "text": {"type": "plain_text", "text": f"📣 {result.version} — Marketing Release Notes"}},
-                    {"type": "section", "text": {"type": "mrkdwn", "text": result.marketing_notes}},
+                    {"type": "section", "text": {"type": "mrkdwn", "text": _safe_text(result.marketing_notes)}},
                 ],
+                reply_ts=parent_ts,
             )
     except Exception as e:
         print(f"[slack_poster] Failed to post marketing notes: {e}")
 
     try:
-        # Message 4: Internal Release Plan (thread reply under Message 1)
+        # Message 4: Internal Release Plan
         table = _build_traceability_table(result)
         readiness_blocks = _build_readiness_blocks(result)
-        client.chat_postMessage(
-            channel=channel,
-            thread_ts=thread_ts,
+        _post(
             text=f"🔍 Internal Release Plan — {result.version}",
             blocks=[
                 {"type": "header", "text": {"type": "plain_text", "text": f"🔍 Internal Release Plan — {result.version}"}},
@@ -120,6 +130,7 @@ def post_all(result: ReleaseResult, channel: str, slack_token: str | None = None
                 {"type": "divider"},
                 {"type": "section", "text": {"type": "mrkdwn", "text": "*Traceability Matrix:*\n" + table}},
             ],
+            reply_ts=parent_ts,
         )
     except Exception as e:
         print(f"[slack_poster] Failed to post internal release plan: {e}")

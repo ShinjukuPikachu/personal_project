@@ -28,7 +28,7 @@ if not SLACK_APP_TOKEN:
 app = App(token=SLACK_BOT_TOKEN)
 
 TRIGGER_RELEASE = """
-mutation TriggerRelease($input: ReleaseInput!) {
+mutation TriggerRelease($input: ReleaseInputGQL!) {
   triggerRelease(input: $input) {
     jobId
     status
@@ -58,11 +58,12 @@ def handle_release(ack, command, client, logger):
         )
         return
 
-    # Post immediate acknowledgment
-    client.chat_postMessage(
+    # Post immediate acknowledgment and capture ts for threading
+    ack_resp = client.chat_postMessage(
         channel=channel,
         text=f"⏳ Generating release notes for *{version}*... (triggered by <@{user}>)",
     )
+    thread_ts = ack_resp["ts"]
 
     # Call the GraphQL service
     try:
@@ -75,6 +76,7 @@ def handle_release(ack, command, client, logger):
                         "version": version,
                         "fromRef": "auto",
                         "channel": channel,
+                        "threadTs": thread_ts,
                     }
                 },
             },

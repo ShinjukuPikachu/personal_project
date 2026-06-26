@@ -13,18 +13,15 @@ from release_pilot.agents.customer_notes_agent import CUSTOMER_NOTES_AGENT
 from release_pilot.agents.marketing_notes_agent import MARKETING_NOTES_AGENT
 from release_pilot.agents.breaking_change_agent import BREAKING_CHANGE_AGENT
 
-try:
-    from claude_agent_sdk import AgentDefinition, ClaudeAgentOptions, ClaudeSDKClient
-    _SDK_AVAILABLE = True
-except ImportError:
-    _SDK_AVAILABLE = False
-    AgentDefinition = None
-    ClaudeAgentOptions = None
-    ClaudeSDKClient = None
+import anthropic as _anthropic
+from release_pilot.agents.base import AgentDefinition
+from release_pilot import config as _config
 
 
 async def run(changeset: ChangeSet) -> ReleaseResult:
     """Three-phase async pipeline. Phase 0: MCP enrichment. Phase 1: classify + readiness. Phase 2: notes."""
+    if _config.TEST_DATA:
+        return _load_test_result(changeset)
 
     # ── Phase 0: MCP enrichment (parallel) ────────────────────────────────
     all_jira_keys = list({k for c in changeset.commits for k in c.jira_keys})
@@ -71,6 +68,66 @@ async def run(changeset: ChangeSet) -> ReleaseResult:
     # ── Build final result ─────────────────────────────────────────────────
     return _build_release_result(enriched, classify_result, readiness_result,
                                   customer_result, marketing_result, breaking_result)
+
+
+def _load_test_result(changeset: ChangeSet) -> ReleaseResult:
+    """Return a fully pre-baked ReleaseResult from test_data/release_result.json."""
+    data = json.loads((_config.TEST_DATA_DIR / "release_result.json").read_text())
+    classify = data["classify"]
+    readiness_data = data["readiness"]
+    jira_data = json.loads((_config.TEST_DATA_DIR / "jira_issues.json").read_text())
+    github_prs = json.loads((_config.TEST_DATA_DIR / "github_prs.json").read_text())
+    github_ci = json.loads((_config.TEST_DATA_DIR / "github_check_runs.json").read_text())
+
+    audience_map = {c["short_hash"]: c["audience"] for c in classify["commits"]}
+    traceability = []
+    for commit in changeset.commits:
+        commit.audience = audience_map.get(commit.short_hash, "internal")
+        jira_tickets = []
+        for key in commit.jira_keys:
+            issue = jira_data.get("issues", {}).get(key, {})
+            if issue and "error" not in issue:
+                jira_tickets.append(JiraTicket(
+                    key=issue.get("key", key),
+                    summary=issue.get("summary", ""),
+                    status=issue.get("status", "Unknown"),
+                    issue_type=issue.get("issue_type", "Unknown"),
+                    priority=issue.get("priority"),
+                ))
+        pr = github_prs.get("prs", {}).get(commit.hash, {})
+        ci = github_ci.get("check_runs", {}).get(commit.hash, {})
+        ci_status = CIStatus(
+            total=ci.get("total", 0),
+            passed=ci.get("passed", 0),
+            failed=ci.get("failed", 0),
+            failed_names=ci.get("failed_names", []),
+        ) if ci.get("total", 0) > 0 else None
+        traceability.append(TraceabilityRow(
+            short_hash=commit.short_hash,
+            description=commit.clean_subject,
+            commit_type=commit.commit_type,
+            is_breaking=commit.is_breaking,
+            jira_tickets=jira_tickets,
+            pr_number=pr.get("number") if pr else None,
+            pr_url=pr.get("url") if pr else None,
+            ci_status=ci_status,
+        ))
+
+    return ReleaseResult(
+        version=changeset.version,
+        suggested_bump=changeset.suggested_bump,
+        readiness=ReadinessReport(
+            score=readiness_data["score"],
+            recommendation=readiness_data["recommendation"],
+            rationale=readiness_data["rationale"],
+            risk_factors=readiness_data["risk_factors"],
+            rollback_plan=readiness_data["rollback_plan"],
+        ),
+        internal_announcement=classify["internal_announcement"],
+        customer_notes=data["customer_notes"]["customer_notes"],
+        marketing_notes=data["marketing_notes"]["marketing_notes"],
+        traceability=traceability,
+    )
 
 
 def _merge_enrichment(changeset: ChangeSet, jira_result: dict, github_result: dict) -> ChangeSet:
@@ -196,27 +253,19 @@ def _validate_output(description: str, result: dict, required_keys: list[str]) -
     return result
 
 
-async def _run_agent(agent_def, user_msg: str) -> dict:
-    """Invoke one agent via ClaudeSDKClient, collect text, extract JSON."""
-    if not _SDK_AVAILABLE:
-        # Stub for testing without SDK installed
+async def _run_agent(agent_def: AgentDefinition, user_msg: str) -> dict:
+    """Invoke one agent via Anthropic API. Tool-using agents fall back to stubs."""
+    if agent_def.tools:
         return _stub_response(agent_def.description)
 
-    options = ClaudeAgentOptions(
-        agents={"agent": agent_def},
-        permission_mode="bypassPermissions",
-        system_prompt=(
-            "Run the `agent` subagent with the given input. "
-            "Return its JSON output verbatim — no prose, no fences."
-        ),
+    client = _anthropic.AsyncAnthropic(api_key=_config.ANTHROPIC_API_KEY)
+    response = await client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4096,
+        system=agent_def.prompt,
+        messages=[{"role": "user", "content": user_msg}],
     )
-    raw = ""
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(user_msg)
-        async for message in client.receive_response():
-            for block in getattr(message, "content", []):
-                if text := getattr(block, "text", None):
-                    raw += text
+    raw = "".join(block.text for block in response.content if hasattr(block, "text"))
     return _extract_json(raw)
 
 

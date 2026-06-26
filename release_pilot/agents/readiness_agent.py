@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from claude_agent_sdk import AgentDefinition
+from release_pilot.agents.base import AgentDefinition
 
 def _load_runbook(name: str) -> str:
     return (Path(__file__).parent.parent.parent / "runbooks" / f"{name}.md").read_text()
