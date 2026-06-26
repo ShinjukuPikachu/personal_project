@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: release-pilot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: release-pilot
+  template:
+    metadata:
+      labels:
+        app: release-pilot
+    spec:
+      containers:
+      - name: release-pilot
+        image: release-pilot:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - secretRef:
+            name: release-pilot-secrets
+        env:
+        - name: TEST_DATA
+          value: "1"
+        - name: TEST_DATA_DIR
+          value: "/app/test_data"
+        - name: DB_PATH
+          value: "/data/releases.db"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: release-pilot-data
