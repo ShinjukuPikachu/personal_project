@@ -1,0 +1,125 @@
+from __future__ import annotations
+import os
+from release_pilot.models import ReleaseResult
+
+try:
+    from slack_sdk import WebClient
+    from slack_sdk.errors import SlackApiError
+    _SLACK_AVAILABLE = True
+except ImportError:
+    _SLACK_AVAILABLE = False
+    WebClient = None
+    SlackApiError = Exception
+
+
+def _ci_emoji(ci) -> str:
+    if not ci:
+        return "—"
+    if ci.failed == 0:
+        return f"✅ {ci.passed}/{ci.total}"
+    return f"⚠️ {ci.passed}/{ci.total} (FAILED: {', '.join(ci.failed_names)})"
+
+
+def _build_traceability_table(result: ReleaseResult) -> str:
+    lines = ["| Commit | Description | Jira | PR | CI |",
+             "|--------|-------------|------|-----|-----|"]
+    for row in result.traceability:
+        jira_str = " ".join(
+            f"{t.key} {'✓' if t.status == 'Done' else '⚠'}" for t in row.jira_tickets
+        ) or "—"
+        pr_str = f"[#{row.pr_number}]({row.pr_url})" if row.pr_number else "—"
+        breaking_marker = " ⚡BREAKING" if row.is_breaking else ""
+        lines.append(
+            f"| `{row.short_hash}` | {row.description}{breaking_marker} | {jira_str} | {pr_str} | {_ci_emoji(row.ci_status)} |"
+        )
+    return "\n".join(lines)
+
+
+def _build_readiness_blocks(result: ReleaseResult) -> list[dict]:
+    rec = result.readiness.recommendation
+    badge = {"READY": "✅ READY", "HOLD": "⚠️ HOLD", "BLOCKED": "🚫 BLOCKED"}.get(rec, rec)
+    risk_text = "\n".join(f"• {r}" for r in result.readiness.risk_factors) or "None identified"
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"Release Readiness: {badge}"}},
+        {"type": "section", "fields": [
+            {"type": "mrkdwn", "text": f"*Score:* {result.readiness.score}/100"},
+            {"type": "mrkdwn", "text": f"*Bump:* {result.suggested_bump}"},
+        ]},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Rationale:*\n{result.readiness.rationale}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Risk Factors:*\n{risk_text}"}},
+    ]
+    if result.readiness.rollback_plan:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Rollback Plan:*\n{result.readiness.rollback_plan}"}})
+    return blocks
+
+
+def post_all(result: ReleaseResult, channel: str, slack_token: str | None = None) -> None:
+    """Post all 4 Slack messages for a release. Errors are logged but not raised."""
+    token = slack_token or os.environ.get("SLACK_BOT_TOKEN")
+    if not token or not _SLACK_AVAILABLE:
+        print(f"[slack_poster] Skipping Slack post — token={'set' if token else 'missing'}, sdk={_SLACK_AVAILABLE}")
+        return
+
+    client = WebClient(token=token)
+    thread_ts = None
+
+    try:
+        # Message 1: Internal Announcement
+        resp = client.chat_postMessage(
+            channel=channel,
+            text=f"📢 *Release {result.version} — Internal Announcement*",
+            blocks=[
+                {"type": "header", "text": {"type": "plain_text", "text": f"📢 Release {result.version} — Internal Announcement"}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": result.internal_announcement}},
+            ],
+        )
+        thread_ts = resp["ts"]
+    except Exception as e:
+        print(f"[slack_poster] Failed to post internal announcement: {e}")
+        return
+
+    try:
+        # Message 2: Customer Release Notes
+        client.chat_postMessage(
+            channel=channel,
+            text=f"📋 *{result.version} Customer Release Notes*",
+            blocks=[
+                {"type": "header", "text": {"type": "plain_text", "text": f"📋 {result.version} — Customer Release Notes"}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": result.customer_notes}},
+            ],
+        )
+    except Exception as e:
+        print(f"[slack_poster] Failed to post customer notes: {e}")
+
+    try:
+        # Message 3: Marketing Release Notes (skip if None)
+        if result.marketing_notes:
+            client.chat_postMessage(
+                channel=channel,
+                text=f"📣 *{result.version} Marketing Release Notes*",
+                blocks=[
+                    {"type": "header", "text": {"type": "plain_text", "text": f"📣 {result.version} — Marketing Release Notes"}},
+                    {"type": "section", "text": {"type": "mrkdwn", "text": result.marketing_notes}},
+                ],
+            )
+    except Exception as e:
+        print(f"[slack_poster] Failed to post marketing notes: {e}")
+
+    try:
+        # Message 4: Internal Release Plan (thread reply under Message 1)
+        table = _build_traceability_table(result)
+        readiness_blocks = _build_readiness_blocks(result)
+        client.chat_postMessage(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=f"🔍 Internal Release Plan — {result.version}",
+            blocks=[
+                {"type": "header", "text": {"type": "plain_text", "text": f"🔍 Internal Release Plan — {result.version}"}},
+                *readiness_blocks,
+                {"type": "divider"},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "*Traceability Matrix:*\n" + table}},
+            ],
+        )
+    except Exception as e:
+        print(f"[slack_poster] Failed to post internal release plan: {e}")

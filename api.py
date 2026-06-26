@@ -151,7 +151,10 @@ async def run_release_pipeline(job_id: str, version: str, from_ref: str, channel
         if not release_exists(version):
             save_release(result, from_ref)
 
-        # Slack posting will be added in Task 12
+        # Post results to Slack
+        from release_pilot.slack_poster import post_all as slack_post_all
+        from release_pilot import config as release_config
+        slack_post_all(result, channel, release_config.SLACK_BOT_TOKEN)
 
     except Exception as e:
         import traceback
