@@ -1,0 +1,14 @@
+{
+  "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2": {"total": 14, "passed": 14, "failed": 0, "failed_names": []},
+  "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3": {"total": 14, "passed": 12, "failed": 2, "failed_names": ["integration/api-backward-compat", "integration/client-sdk-v1"]},
+  "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4": {"total": 8,  "passed": 8,  "failed": 0, "failed_names": []},
+  "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5": {"total": 10, "passed": 10, "failed": 0, "failed_names": []},
+  "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6": {"total": 12, "passed": 12, "failed": 0, "failed_names": []},
+  "f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1": {"total": 5,  "passed": 5,  "failed": 0, "failed_names": []},
+  "a7b8c9d0e1f2a7b8c9d0e1f2a7b8c9d0e1f2a7b8": {"total": 11, "passed": 11, "failed": 0, "failed_names": []},
+  "b8c9d0e1f2a3b8c9d0e1f2a3b8c9d0e1f2a3b8c9": {"total": 3,  "passed": 3,  "failed": 0, "failed_names": []},
+  "c9d0e1f2a3b4c9d0e1f2a3b4c9d0e1f2a3b4c9d0": {"total": 9,  "passed": 9,  "failed": 0, "failed_names": []},
+  "d0e1f2a3b4c5d0e1f2a3b4c5d0e1f2a3b4c5d0e1": {"total": 16, "passed": 16, "failed": 0, "failed_names": []},
+  "e1f2a3b4c5d6e1f2a3b4c5d6e1f2a3b4c5d6e1f2": {"total": 13, "passed": 13, "failed": 0, "failed_names": []},
+  "f2a3b4c5d6e7f2a3b4c5d6e7f2a3b4c5d6e7f2a3": {"total": 13, "passed": 11, "failed": 0, "failed_names": [], "skipped": 2}
+}

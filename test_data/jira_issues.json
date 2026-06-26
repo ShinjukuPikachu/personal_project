@@ -1,0 +1,10 @@
+{
+  "MUJIN-456": {"key": "MUJIN-456", "fields": {"summary": "Vision-guided pick confirmation for grasping module", "status": {"name": "Done"}, "issuetype": {"name": "Story"}, "priority": {"name": "High"}}},
+  "MUJIN-789": {"key": "MUJIN-789", "fields": {"summary": "API versioning: migrate robot status endpoints to v2", "status": {"name": "Done"}, "issuetype": {"name": "Task"}, "priority": {"name": "High"}}},
+  "MUJIN-234": {"key": "MUJIN-234", "fields": {"summary": "Stack overflow in dense palletizing layer solver (>8 SKU types)", "status": {"name": "Done"}, "issuetype": {"name": "Bug"}, "priority": {"name": "Critical"}}},
+  "MUJIN-567": {"key": "MUJIN-567", "fields": {"summary": "Reduce motion planning latency for repeated task sequences", "status": {"name": "Done"}, "issuetype": {"name": "Story"}, "priority": {"name": "Medium"}}},
+  "MUJIN-890": {"key": "MUJIN-890", "fields": {"summary": "Token refresh race condition causes 401 loops under concurrent load", "status": {"name": "Done"}, "issuetype": {"name": "Bug"}, "priority": {"name": "High"}}},
+  "MUJIN-345": {"key": "MUJIN-345", "fields": {"summary": "Real-time joint temperature monitoring and overheat alerts", "status": {"name": "Done"}, "issuetype": {"name": "Story"}, "priority": {"name": "Medium"}}},
+  "MUJIN-123": {"key": "MUJIN-123", "fields": {"summary": "Depth sensor calibration fails in low ambient light environments", "status": {"name": "Done"}, "issuetype": {"name": "Bug"}, "priority": {"name": "High"}}},
+  "MUJIN-678": {"key": "MUJIN-678", "fields": {"summary": "SAP Extended Warehouse Management (EWM) integration connector", "status": {"name": "Done"}, "issuetype": {"name": "Story"}, "priority": {"name": "High"}}}
+}
