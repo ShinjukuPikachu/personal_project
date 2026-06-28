@@ -18,24 +18,53 @@ from release_pilot.agents.base import AgentDefinition
 from release_pilot import config as _config
 
 
-async def run(changeset: ChangeSet) -> ReleaseResult:
-    """Three-phase async pipeline. Phase 0: MCP enrichment. Phase 1: classify + readiness. Phase 2: notes."""
+def _llm_label() -> str:
+    """Human-readable label for whichever LLM backend is active."""
+    if _config.KIMI_API_KEY:
+        return f"Kimi ({_config.KIMI_MODEL})"
+    if _config.ANTHROPIC_API_KEY:
+        return "Claude (Anthropic)"
+    return "LLM (stub)"
+
+
+async def run(changeset: ChangeSet, progress_cb=None) -> ReleaseResult:
+    """Three-phase async pipeline. Phase 0: enrichment. Phase 1: classify + readiness. Phase 2: notes.
+
+    TEST_DATA=1 mocks only Phase 0 (Jira + GitHub fixtures); Phases 1 & 2 still call the LLM.
+    progress_cb(msg): optional callable that posts status updates to Slack.
+    """
+    def _post(msg: str):
+        if progress_cb:
+            try:
+                progress_cb(msg)
+            except Exception:
+                pass
+
+    llm = _llm_label()
+    n = len(changeset.commits)
+
+    # ── Phase 0: enrichment ───────────────────────────────────────────────
     if _config.TEST_DATA:
-        return _load_test_result(changeset)
+        _post(f"⚙️ *Phase 0* — Loading {n} commits + Jira & GitHub data from test fixtures")
+        jira_result, github_result = _load_enrichment_from_test_data()
+    else:
+        _post(f"⚙️ *Phase 0* — Fetching Jira tickets & GitHub PR/CI data for {n} commits via MCP")
+        all_jira_keys = list({k for c in changeset.commits for k in c.jira_keys})
+        all_shas = [c.hash for c in changeset.commits]
+        jira_result, github_result = await asyncio.gather(
+            _run_agent(JIRA_ENRICHMENT_AGENT, json.dumps({"jira_keys": all_jira_keys})),
+            _run_agent(GITHUB_ENRICHMENT_AGENT, json.dumps({"commit_shas": all_shas})),
+        )
 
-    # ── Phase 0: MCP enrichment (parallel) ────────────────────────────────
-    all_jira_keys = list({k for c in changeset.commits for k in c.jira_keys})
-    all_shas = [c.hash for c in changeset.commits]
-
-    jira_result, github_result = await asyncio.gather(
-        _run_agent(JIRA_ENRICHMENT_AGENT, json.dumps({"jira_keys": all_jira_keys})),
-        _run_agent(GITHUB_ENRICHMENT_AGENT, json.dumps({"commit_shas": all_shas})),
-    )
-
-    # Merge enrichment into commits
     enriched = _merge_enrichment(changeset, jira_result, github_result)
 
     # ── Phase 1: classify + readiness (parallel) ──────────────────────────
+    _post(
+        f"🤖 *Phase 1* — Running 2 AI agents in parallel via *{llm}*\n"
+        f"   • *Classifier*: labelling {n} commits by audience & breaking-change status\n"
+        f"   • *Readiness*: scoring release risk from CI failures & open Jira tickets"
+    )
+
     classify_input = _build_classify_input(enriched)
     readiness_input = _build_readiness_input(enriched)
 
@@ -44,14 +73,26 @@ async def run(changeset: ChangeSet) -> ReleaseResult:
         _run_agent(READINESS_AGENT, readiness_input),
     )
 
-    # Apply classifier audience labels to commits
     audience_map = {c["short_hash"]: c["audience"] for c in classify_result.get("commits", [])}
     for commit in enriched.commits:
         commit.audience = audience_map.get(commit.short_hash, "internal")
 
-    # ── Phase 2: notes generation (parallel) ──────────────────────────────
     customer_commits = [c for c in enriched.commits if c.audience in ("customer", "marketing")]
     marketing_commits = [c for c in enriched.commits if c.audience == "marketing"]
+    n_breaking = len(enriched.breaking)
+
+    # ── Phase 2: notes generation (parallel) ──────────────────────────────
+    phase2_agents = [
+        f"• *Customer Notes*: drafting release notes for {len(customer_commits)} customer-facing commits",
+        f"• *Marketing Notes*: writing copy for {len(marketing_commits)} headline features",
+    ]
+    if enriched.breaking:
+        phase2_agents.append(f"• *Breaking Change*: documenting migration steps for {n_breaking} breaking commit(s)")
+
+    _post(
+        f"🤖 *Phase 2* — Running {len(phase2_agents)} AI agents in parallel via *{llm}*\n"
+        + "\n".join(f"   {a}" for a in phase2_agents)
+    )
 
     phase2_coros = [
         _run_agent(CUSTOMER_NOTES_AGENT, _build_notes_input(customer_commits, enriched.version, "customer")),
@@ -65,9 +106,43 @@ async def run(changeset: ChangeSet) -> ReleaseResult:
     marketing_result = phase2_results[1]
     breaking_result = phase2_results[2] if len(phase2_results) > 2 else None
 
+    _post("✅ *All agents complete* — compiling results...")
+
     # ── Build final result ─────────────────────────────────────────────────
     return _build_release_result(enriched, classify_result, readiness_result,
                                   customer_result, marketing_result, breaking_result)
+
+
+def _load_enrichment_from_test_data() -> tuple[dict, dict]:
+    """Load Jira + GitHub fixture files and normalise into the shape _merge_enrichment expects."""
+    jira_raw = json.loads((_config.TEST_DATA_DIR / "jira_issues.json").read_text())
+    prs_raw = json.loads((_config.TEST_DATA_DIR / "github_prs.json").read_text())
+    ci_raw = json.loads((_config.TEST_DATA_DIR / "github_check_runs.json").read_text())
+
+    # Normalise Jira: {key: {fields: {summary, status: {name}, issuetype: {name}, priority: {name}}}}
+    # → {key: {key, summary, status, issue_type, priority}}
+    issues = {}
+    for key, raw in jira_raw.items():
+        fields = raw.get("fields", {})
+        issues[key] = {
+            "key": key,
+            "summary": fields.get("summary", ""),
+            "status": fields.get("status", {}).get("name", "Unknown"),
+            "issue_type": fields.get("issuetype", {}).get("name", "Unknown"),
+            "priority": fields.get("priority", {}).get("name"),
+        }
+
+    # Normalise GitHub PRs: {hash: {number, title, html_url, user: {login}}}
+    # → {hash: {number, title, url}}
+    prs = {}
+    for sha, pr in prs_raw.items():
+        prs[sha] = {
+            "number": pr.get("number"),
+            "title": pr.get("title", ""),
+            "url": pr.get("html_url", ""),
+        }
+
+    return {"issues": issues}, {"prs": prs, "check_runs": ci_raw}
 
 
 def _load_test_result(changeset: ChangeSet) -> ReleaseResult:
@@ -113,19 +188,24 @@ def _load_test_result(changeset: ChangeSet) -> ReleaseResult:
             ci_status=ci_status,
         ))
 
+    # Substitute the hardcoded template version with the actual requested version
+    version = changeset.version
+    def _vsub(text: str | None) -> str | None:
+        return text.replace("v2.3.0", version).replace("2.3.0", version.lstrip("v")) if text else text
+
     return ReleaseResult(
-        version=changeset.version,
+        version=version,
         suggested_bump=changeset.suggested_bump,
         readiness=ReadinessReport(
             score=readiness_data["score"],
             recommendation=readiness_data["recommendation"],
-            rationale=readiness_data["rationale"],
-            risk_factors=readiness_data["risk_factors"],
-            rollback_plan=readiness_data["rollback_plan"],
+            rationale=_vsub(readiness_data["rationale"]),
+            risk_factors=[_vsub(r) for r in readiness_data["risk_factors"]],
+            rollback_plan=_vsub(readiness_data["rollback_plan"]),
         ),
-        internal_announcement=classify["internal_announcement"],
-        customer_notes=data["customer_notes"]["customer_notes"],
-        marketing_notes=data["marketing_notes"]["marketing_notes"],
+        internal_announcement=_vsub(classify["internal_announcement"]),
+        customer_notes=_vsub(data["customer_notes"]["customer_notes"]),
+        marketing_notes=_vsub(data["marketing_notes"]["marketing_notes"]),
         traceability=traceability,
     )
 
@@ -231,8 +311,8 @@ def _build_breaking_input(breaking_commits: list) -> str:
 
 
 def _extract_json(text: str) -> dict:
-    """Brace-matching scanner: find the last balanced {...} block in text."""
-    start = text.rfind("{")
+    """Brace-matching scanner: find the first balanced {...} block in text."""
+    start = text.find("{")
     if start == -1:
         raise ValueError(f"No JSON object found in agent output: {text[:200]!r}")
     depth = 0
@@ -254,10 +334,45 @@ def _validate_output(description: str, result: dict, required_keys: list[str]) -
 
 
 async def _run_agent(agent_def: AgentDefinition, user_msg: str) -> dict:
-    """Invoke one agent via Anthropic API. Tool-using agents fall back to stubs."""
+    """Invoke one agent. Uses Kimi if KIMI_API_KEY is set, otherwise Anthropic."""
     if agent_def.tools:
         return _stub_response(agent_def.description)
 
+    if not _config.KIMI_API_KEY and not _config.ANTHROPIC_API_KEY:
+        raise RuntimeError("No LLM API key configured. Set KIMI_API_KEY or ANTHROPIC_API_KEY.")
+
+    coro = _run_agent_kimi(agent_def, user_msg) if _config.KIMI_API_KEY else _run_agent_anthropic(agent_def, user_msg)
+    try:
+        return await asyncio.wait_for(coro, timeout=60.0)
+    except asyncio.TimeoutError:
+        raise RuntimeError(f"Agent '{agent_def.description}' timed out after 60s")
+
+
+async def _run_agent_kimi(agent_def: AgentDefinition, user_msg: str) -> dict:
+    import logging
+    import httpx
+    from openai import AsyncOpenAI
+    log = logging.getLogger(__name__)
+    log.info(f"kimi call start: {agent_def.description[:60]}")
+    client = AsyncOpenAI(
+        api_key=_config.KIMI_API_KEY,
+        base_url=_config.KIMI_BASE_URL,
+        http_client=httpx.AsyncClient(timeout=55.0),
+    )
+    response = await client.chat.completions.create(
+        model=_config.KIMI_MODEL,
+        max_tokens=6000,
+        messages=[
+            {"role": "system", "content": agent_def.prompt},
+            {"role": "user", "content": user_msg},
+        ],
+    )
+    raw = response.choices[0].message.content or ""
+    log.info(f"kimi call done: {agent_def.description[:60]}, response len={len(raw)}")
+    return _extract_json(raw)
+
+
+async def _run_agent_anthropic(agent_def: AgentDefinition, user_msg: str) -> dict:
     client = _anthropic.AsyncAnthropic(api_key=_config.ANTHROPIC_API_KEY)
     response = await client.messages.create(
         model="claude-sonnet-4-6",

@@ -15,10 +15,18 @@ Voice: clear, benefit-focused, low-jargon. For breaking changes, include "What y
 
 Return ONE JSON object only — no prose, no markdown fences:
 {
-  "customer_notes": "## MujinOS v2.3.0 — What's New\\n\\n..."
+  "customer_notes": "## NyankoOS v2.3.0 — What's New\\n\\n..."
 }
 
-Format customer_notes as clean markdown. Use ## for version header, ### for categories (New Features, Bug Fixes, Performance, Important: Breaking Changes). Do not mention internal-only changes.
+Format customer_notes as clean markdown. Use ## for version header, ### for categories (New Features, Bug Fixes, Performance, Important: Breaking Changes).
+
+Rules:
+- Do NOT include Jira ticket numbers (no NYANKO-XXX references)
+- Do NOT include PR numbers or links
+- Do NOT include CI status or internal metrics
+- Focus on customer benefit and outcome, not implementation detail
+- For breaking changes include a clear "What you need to do:" action item
+- Write as if publishing to a public changelog
 """
 
 CUSTOMER_NOTES_AGENT = AgentDefinition(

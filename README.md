@@ -1,6 +1,6 @@
 # release-pilot
 
-AI-powered release notes generation for MujinOS.
+AI-powered release notes generation for NyankoOS.
 
 ## What It Does
 
@@ -55,4 +55,4 @@ bash setup.sh  # Deploy to K8s (fill in k8s/secret.yaml first)
 - **GraphQL Playground**: http://localhost:8080/graphql (local) or http://localhost:30080/graphql (K8s)
 - **Run tests**: `pytest tests/ -v`
 - **Agent behavior**: Edit runbooks/ markdown files to tune behavior without code changes
-- **Test data mode**: `TEST_DATA=1` routes calls to mock data in test_data/ (12 MujinOS v2.3.0 commits with intentional CI failures)
+- **Test data mode**: `TEST_DATA=1` routes calls to mock data in test_data/ (12 NyankoOS v2.3.0 commits with intentional CI failures)

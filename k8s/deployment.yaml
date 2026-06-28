@@ -31,6 +31,8 @@ spec:
           value: "/app/test_data"
         - name: DB_PATH
           value: "/data/releases.db"
+        - name: PDF_DIR
+          value: "/data/pdfs"
         volumeMounts:
         - name: data
           mountPath: /data

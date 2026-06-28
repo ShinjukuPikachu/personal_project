@@ -1,6 +1,6 @@
 # release-pilot for Claude
 
-Show-and-tell project for Mujin Release Engineer (DevEx) interview. Demonstrates AI-assisted release automation via multi-agent orchestration.
+Show-and-tell project for Nyanko Release Engineer (DevEx) interview. Demonstrates AI-assisted release automation via multi-agent orchestration.
 
 ## Quick Start
 
@@ -56,7 +56,7 @@ Edit `runbooks/<agent>.md` files to adjust tone, detail level, or focus without 
 ## Test Data
 
 `TEST_DATA=1` mode:
-- Uses 12 mock MujinOS v2.3.0 commits (test_data/commits.json)
+- Uses 12 mock NyankoOS v2.3.0 commits (test_data/commits.json)
 - PR #46 has 2 intentionally failing CI checks (demonstrates readiness scoring)
 - No external API calls; all responses from test_data/*.json
 

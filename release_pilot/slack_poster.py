@@ -54,8 +54,31 @@ def _build_readiness_blocks(result: ReleaseResult) -> list[dict]:
     return blocks
 
 
+_SLACK_TEXT_LIMIT = 2900  # Slack hard limit is 3000; leave headroom
+
+
 def _safe_text(text: str | None, fallback: str = "_(no content)_") -> str:
-    return text.strip() if text and text.strip() else fallback
+    t = text.strip() if text and text.strip() else fallback
+    if len(t) > _SLACK_TEXT_LIMIT:
+        t = t[:_SLACK_TEXT_LIMIT - 30] + "\n\n_(truncated — see web for full notes)_"
+    return t
+
+
+def _section_blocks(text: str) -> list[dict]:
+    """Split long text into multiple mrkdwn section blocks, each within the Slack limit."""
+    chunks: list[str] = []
+    remaining = text.strip()
+    while remaining:
+        if len(remaining) <= _SLACK_TEXT_LIMIT:
+            chunks.append(remaining)
+            break
+        # Split at a newline boundary near the limit
+        split_at = remaining.rfind("\n", 0, _SLACK_TEXT_LIMIT)
+        if split_at <= 0:
+            split_at = _SLACK_TEXT_LIMIT
+        chunks.append(remaining[:split_at])
+        remaining = remaining[split_at:].lstrip("\n")
+    return [{"type": "section", "text": {"type": "mrkdwn", "text": c}} for c in chunks if c]
 
 
 def post_all(result: ReleaseResult, channel: str, slack_token: str | None = None, thread_ts: str | None = None) -> None:
@@ -81,7 +104,7 @@ def post_all(result: ReleaseResult, channel: str, slack_token: str | None = None
             text=f"📢 Release {result.version} — Internal Announcement",
             blocks=[
                 {"type": "header", "text": {"type": "plain_text", "text": f"📢 Release {result.version} — Internal Announcement"}},
-                {"type": "section", "text": {"type": "mrkdwn", "text": _safe_text(result.internal_announcement)}},
+                *_section_blocks(_safe_text(result.internal_announcement)),
             ],
             reply_ts=parent_ts,
         )
@@ -97,7 +120,7 @@ def post_all(result: ReleaseResult, channel: str, slack_token: str | None = None
             text=f"📋 {result.version} Customer Release Notes",
             blocks=[
                 {"type": "header", "text": {"type": "plain_text", "text": f"📋 {result.version} — Customer Release Notes"}},
-                {"type": "section", "text": {"type": "mrkdwn", "text": _safe_text(result.customer_notes)}},
+                *_section_blocks(_safe_text(result.customer_notes)),
             ],
             reply_ts=parent_ts,
         )
@@ -111,7 +134,7 @@ def post_all(result: ReleaseResult, channel: str, slack_token: str | None = None
                 text=f"📣 {result.version} Marketing Release Notes",
                 blocks=[
                     {"type": "header", "text": {"type": "plain_text", "text": f"📣 {result.version} — Marketing Release Notes"}},
-                    {"type": "section", "text": {"type": "mrkdwn", "text": _safe_text(result.marketing_notes)}},
+                    *_section_blocks(_safe_text(result.marketing_notes)),
                 ],
                 reply_ts=parent_ts,
             )
@@ -128,7 +151,7 @@ def post_all(result: ReleaseResult, channel: str, slack_token: str | None = None
                 {"type": "header", "text": {"type": "plain_text", "text": f"🔍 Internal Release Plan — {result.version}"}},
                 *readiness_blocks,
                 {"type": "divider"},
-                {"type": "section", "text": {"type": "mrkdwn", "text": "*Traceability Matrix:*\n" + table}},
+                *_section_blocks("*Traceability Matrix:*\n" + table),
             ],
             reply_ts=parent_ts,
         )
