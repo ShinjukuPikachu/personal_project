@@ -51,7 +51,7 @@ _RELEASES = [
         "recommendation": "READY",
         "internal_announcement": "## NyankoOS v1.1.10 — Patch Release\n\nSecurity and stability patches. All customers on v1.1.x should upgrade.\n\n- SLAM map corruption on hard power cycle (critical)\n- Memory leak in point cloud pipeline (critical)\n- E-stop not propagating to conveyor PLC (critical)",
         "customer_notes": "## NyankoOS v1.1.10 — Patch Release\n\nThis patch release addresses three critical stability and safety issues. **All customers on v1.1.x are strongly encouraged to upgrade.**\n\n### Critical Fixes\n\n- **SLAM Map Corruption** — Fixed a corruption bug that occurred when the controller experienced a hard power cycle during active mapping. Maps are now written atomically.\n\n- **Memory Leak in Vision Pipeline** — Fixed a memory leak in the point cloud pre-processing pipeline that caused controller memory to exhaust after ~72 hours of continuous operation.\n\n- **E-Stop Propagation** — Fixed an issue where a robot arm E-stop did not propagate to the connected conveyor belt PLC, leaving the belt running after an emergency stop.",
-        "marketing_notes": None,
+        "marketing_notes": "## NyankoOS v1.1.10 — Critical Safety & Stability Patch\n\nNyankoOS v1.1.10 addresses three critical issues including an E-stop propagation failure and a memory leak that caused controller instability after 72 hours of continuous operation. All customers on v1.1.x should upgrade immediately.",
         "traceability": [
             {"short_hash": "8b9c0d1", "description": "fix(slam): map corruption on hard power cycle", "commit_type": "fix", "is_breaking": False, "pr_number": 15, "pr_url": "https://github.com/nyanko/nyankoos/pull/15"},
             {"short_hash": "9c0d1e2", "description": "fix(vision): memory leak in point cloud pipeline", "commit_type": "fix", "is_breaking": False, "pr_number": 16, "pr_url": "https://github.com/nyanko/nyankoos/pull/16"},
@@ -118,7 +118,7 @@ _RELEASES = [
         "recommendation": "READY",
         "internal_announcement": "## NyankoOS v2.0.1 — Hotfix\n\nFixes the two failing CI checks that shipped with v2.0.0. Backward-compat endpoints restored. All customers should upgrade from v2.0.0.",
         "customer_notes": "## NyankoOS v2.0.1 — Patch Release\n\n### Fixes\n\n- **Restored API v1 backward compatibility** — Two v1 endpoints (`/api/v1/tasks` and `/api/v1/status`) were returning 404 in v2.0.0 due to a routing regression. Both are restored and will continue to function through the deprecation window.\n- **SDK v1 connect fallback** — `RobotClient.connect_v1()` no longer raises `NotImplementedError` in v2.0.0. The deprecation warning is preserved.",
-        "marketing_notes": None,
+        "marketing_notes": "## NyankoOS v2.0.1 — API Compatibility Restored\n\nNyankoOS v2.0.1 restores full backward compatibility with the v1 API after a routing regression in the v2.0.0 launch. Customers using v1 API endpoints can upgrade from v2.0.0 immediately with no integration changes required.",
         "traceability": [
             {"short_hash": "3e4f5a6", "description": "fix(api): restore v1 backward-compat routing regression", "commit_type": "fix", "is_breaking": False, "pr_number": 39, "pr_url": "https://github.com/nyanko/nyankoos/pull/39"},
             {"short_hash": "4f5a6b7", "description": "fix(sdk): restore connect_v1 deprecation shim", "commit_type": "fix", "is_breaking": False, "pr_number": 40, "pr_url": "https://github.com/nyanko/nyankoos/pull/40"},
@@ -167,7 +167,7 @@ _RELEASES = [
         "recommendation": "READY",
         "internal_announcement": "## NyankoOS v2.2.1 — Patch Release\n\nAddresses QA regression failures found in v2.2.0 palletizing smoke suite and load test results. Fixes thread pool exhaustion under high API concurrency.",
         "customer_notes": "## NyankoOS v2.2.1 — Patch Release\n\n### Fixes\n\n- **Thread Pool Exhaustion** — Fixed a bug where sustained API load above 200 concurrent requests caused the thread pool to exhaust, resulting in 503 errors. The pool is now dynamically sized.\n\n- **Palletizing Smoke Suite Regression** — Fixed a regression in the palletizing layer solver introduced in v2.2.0 that caused incorrect pallet patterns for SKUs with aspect ratio > 3:1.\n\n- **Vision Model Accuracy After OpenCV Upgrade** — Corrected a calibration parameter that caused a 3% accuracy drop after the OpenCV 4.8 upgrade in v2.2.0. Accuracy is restored to v2.1.0 baseline.",
-        "marketing_notes": None,
+        "marketing_notes": "## NyankoOS v2.2.1 — Pick Accuracy and Palletizing Reliability Restored\n\nNyankoOS v2.2.1 corrects a vision calibration drift introduced in v2.2.0, restoring pick accuracy to the v2.1.0 baseline, and fixes a palletizing pattern regression for high aspect-ratio SKUs. Customers running v2.2.0 should upgrade.",
         "traceability": [
             {"short_hash": "3c4d5e6", "description": "fix(api): dynamic thread pool sizing under high concurrency", "commit_type": "fix", "is_breaking": False, "pr_number": 48, "pr_url": "https://github.com/nyanko/nyankoos/pull/48"},
             {"short_hash": "4d5e6f7", "description": "fix(palletizing): layer solver regression for high aspect-ratio SKUs", "commit_type": "fix", "is_breaking": False, "pr_number": 49, "pr_url": "https://github.com/nyanko/nyankoos/pull/49"},
@@ -186,6 +186,12 @@ def seed_releases(db_path: str = config.DB_PATH) -> int:
                 "SELECT 1 FROM releases WHERE version = ?", (r["version"],)
             ).fetchone()
             if exists:
+                # Patch marketing_notes if it was seeded as NULL but now has content
+                if r["marketing_notes"]:
+                    conn.execute(
+                        "UPDATE releases SET marketing_notes = ? WHERE version = ? AND marketing_notes IS NULL",
+                        (r["marketing_notes"], r["version"])
+                    )
                 continue
 
             created_at = (

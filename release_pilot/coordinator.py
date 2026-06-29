@@ -79,12 +79,19 @@ async def run(changeset: ChangeSet, progress_cb=None) -> ReleaseResult:
 
     customer_commits = [c for c in enriched.commits if c.audience in ("customer", "marketing")]
     marketing_commits = [c for c in enriched.commits if c.audience == "marketing"]
+    # Fall back to top customer commits when no marketing-tier commits were classified
+    marketing_source = marketing_commits if marketing_commits else customer_commits[:5]
     n_breaking = len(enriched.breaking)
 
     # ── Phase 2: notes generation (parallel) ──────────────────────────────
+    marketing_label = (
+        f"{len(marketing_commits)} headline features"
+        if marketing_commits
+        else f"top {len(marketing_source)} customer highlights (no marketing-tier commits)"
+    )
     phase2_agents = [
         f"• *Customer Notes*: drafting release notes for {len(customer_commits)} customer-facing commits",
-        f"• *Marketing Notes*: writing copy for {len(marketing_commits)} headline features",
+        f"• *Marketing Notes*: writing copy for {marketing_label}",
     ]
     if enriched.breaking:
         phase2_agents.append(f"• *Breaking Change*: documenting migration steps for {n_breaking} breaking commit(s)")
@@ -96,7 +103,7 @@ async def run(changeset: ChangeSet, progress_cb=None) -> ReleaseResult:
 
     phase2_coros = [
         _run_agent(CUSTOMER_NOTES_AGENT, _build_notes_input(customer_commits, enriched.version, "customer")),
-        _run_agent(MARKETING_NOTES_AGENT, _build_notes_input(marketing_commits, enriched.version, "marketing")),
+        _run_agent(MARKETING_NOTES_AGENT, _build_notes_input(marketing_source, enriched.version, "marketing")),
     ]
     if enriched.breaking:
         phase2_coros.append(_run_agent(BREAKING_CHANGE_AGENT, _build_breaking_input(enriched.breaking)))
