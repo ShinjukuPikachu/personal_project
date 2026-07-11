@@ -587,7 +587,7 @@ _RELEASES = [
             },
             {
                 "short_hash": "4d5e6f7",
-                "description": ("fix(palletizing): layer solver regression for high aspect-ratio SKUs",),
+                "description": "fix(palletizing): layer solver regression for high aspect-ratio SKUs",
                 "commit_type": "fix",
                 "is_breaking": False,
                 "pr_number": 49,
