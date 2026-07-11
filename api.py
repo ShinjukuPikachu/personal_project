@@ -6,6 +6,7 @@ from enum import Enum
 
 import strawberry
 from fastapi import BackgroundTasks, FastAPI
+from fastapi import Response
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from strawberry.fastapi import GraphQLRouter
 
@@ -20,6 +21,17 @@ from release_pilot.store import (
     release_exists,
     save_release,
 )
+
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+import time
+
+from fastapi import Request
+from release_pilot.metrics import (
+    HTTP_REQUEST_DURATION_SECONDS,
+    HTTP_REQUESTS_TOTAL,
+)
+
 
 # ── In-memory job store ─────────────────────────────────────────────────
 jobs: dict[str, dict] = {}
@@ -581,3 +593,44 @@ def release_detail(version: str):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics() -> Response:
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
+
+
+@app.middleware("http")
+async def collect_http_metrics(request: Request, call_next):
+    start_time = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        HTTP_REQUESTS_TOTAL.labels(
+            method=request.method,
+            path=request.url.path,
+            status="500",
+        ).inc()
+        raise
+
+    duration = time.perf_counter() - start_time
+
+    route = request.scope.get("route")
+    path = getattr(route, "path", request.url.path)
+
+    HTTP_REQUESTS_TOTAL.labels(
+        method=request.method,
+        path=path,
+        status=str(response.status_code),
+    ).inc()
+
+    HTTP_REQUEST_DURATION_SECONDS.labels(
+        method=request.method,
+        path=path,
+    ).observe(duration)
+
+    return response
