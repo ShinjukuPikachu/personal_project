@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from enum import Enum
 
 import strawberry
-from fastapi import BackgroundTasks, FastAPI
-from fastapi import Response
+from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from strawberry.fastapi import GraphQLRouter
 
 from release_pilot.git import get_commits
+from release_pilot.metrics import (
+    HTTP_REQUEST_DURATION_SECONDS,
+    HTTP_REQUESTS_TOTAL,
+)
 from release_pilot.models import ReleaseResult
 from release_pilot.parser import parse_commits
 from release_pilot.semver import build_changeset
@@ -21,17 +26,6 @@ from release_pilot.store import (
     release_exists,
     save_release,
 )
-
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-
-import time
-
-from fastapi import Request
-from release_pilot.metrics import (
-    HTTP_REQUEST_DURATION_SECONDS,
-    HTTP_REQUESTS_TOTAL,
-)
-
 
 # ── In-memory job store ─────────────────────────────────────────────────
 jobs: dict[str, dict] = {}
