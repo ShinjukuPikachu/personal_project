@@ -22,7 +22,7 @@ spec:
       containers:
         - name: release-agent
 
-          image: ghcr.io/shinjukupikachu/release-pilot:17d4866
+          image: ghcr.io/shinjukupikachu/release-pilot:63d8e13
 
           imagePullPolicy: Always
 
